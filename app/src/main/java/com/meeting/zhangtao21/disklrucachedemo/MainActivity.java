@@ -7,6 +7,7 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.os.Bundle;
 import android.os.Environment;
+import android.support.v4.util.LruCache;
 import android.support.v7.app.AppCompatActivity;
 import android.view.View;
 import android.widget.ImageView;
@@ -21,11 +22,15 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.net.URLConnection;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 
 public class MainActivity extends AppCompatActivity {
 
+    String imageUrl = "http://img.my.csdn.net/uploads/201309/01/1378037235_7476.jpg";
+
+    private LruCache<String, Bitmap> mMemoryCache;
     private DiskLruCache mDiskLruCache = null;
     private File cacheDir;
 
@@ -44,11 +49,19 @@ public class MainActivity extends AppCompatActivity {
             e.printStackTrace();
         }
 
+        int maxMemory = (int) (Runtime.getRuntime().maxMemory() / 1024);
+        int cacheSize = maxMemory / 8;
+        mMemoryCache = new LruCache<String, Bitmap>(cacheSize) {
+            @Override
+            protected int sizeOf(String key, Bitmap bitmap) {
+                return bitmap.getByteCount() / 1024;
+            }
+        };
+
         new Thread(new Runnable() {
             @Override
             public void run() {
                 try {
-                    String imageUrl = "http://img.my.csdn.net/uploads/201309/01/1378037235_7476.jpg";
                     String key = hashKeyForDisk(imageUrl);
                     DiskLruCache.Editor editor = mDiskLruCache.edit(key);
                     if (editor != null) {
@@ -60,6 +73,8 @@ public class MainActivity extends AppCompatActivity {
                         }
                     }
                     mDiskLruCache.flush();
+
+                    addBitmapToMemoryCache(key,loadBitmapFromUrl(imageUrl));
                 } catch (IOException e) {
                     e.printStackTrace();
                 }
@@ -69,7 +84,6 @@ public class MainActivity extends AppCompatActivity {
 
     public void textClick(View view){
         try {
-            String imageUrl = "http://img.my.csdn.net/uploads/201309/01/1378037235_7476.jpg";
             String key = hashKeyForDisk(imageUrl);
             DiskLruCache.Snapshot snapShot = mDiskLruCache.get(key);
             if (snapShot != null) {
@@ -82,9 +96,13 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    public void loadfromlru(View view){
+        String key = hashKeyForDisk(imageUrl);
+        ((ImageView)findViewById(R.id.image)).setImageBitmap(getBitmapFromMemCache(key));
+    }
+
     public void clear(View view){
         try {
-            String imageUrl = "http://img.my.csdn.net/uploads/201309/01/1378037235_7476.jpg";
             String key = hashKeyForDisk(imageUrl);
             mDiskLruCache.remove(key);
         } catch (IOException e) {
@@ -169,6 +187,23 @@ public class MainActivity extends AppCompatActivity {
             sb.append(hex);
         }
         return sb.toString();
+    }
+
+
+    public void addBitmapToMemoryCache(String key, Bitmap bitmap) {
+        if (getBitmapFromMemCache(key) == null) {
+            mMemoryCache.put(key, bitmap);
+        }
+    }
+
+    public Bitmap getBitmapFromMemCache(String key) {
+        return mMemoryCache.get(key);
+    }
+
+    public Bitmap loadBitmapFromUrl(String urlString) throws IOException {
+        URL url = new URL(urlString);
+        URLConnection urlConnection = (HttpURLConnection) url.openConnection();
+        return BitmapFactory.decodeStream(urlConnection.getInputStream());
     }
 
     @Override
